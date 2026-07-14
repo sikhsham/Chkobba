@@ -33,7 +33,7 @@ public class GameManager : MonoBehaviour
     private const float visibleWidth = 9f;
 
     // State
-    private enum TurnPhase { Idle, Selecting, AiTurn, RoundEnd }
+    private enum TurnPhase { Cutting, Idle, Selecting, AiTurn, RoundEnd }
     private TurnPhase phase = TurnPhase.Idle;
 
     private Deck deck;
@@ -53,6 +53,9 @@ public class GameManager : MonoBehaviour
     private int playerScore;
     private int aiScore;
     private string lastCapturer = ""; // "player" or "ai"
+    private int roundNumber = 1;
+    private Card cuttingCard; // the card revealed during cutting phase
+    private CardObject cuttingDisplayObj; // cached reference to cutting display card
     private const int targetScore = 11;
 
     // UI elements
@@ -182,6 +185,7 @@ public class GameManager : MonoBehaviour
     void UpdateButtons()
     {
         if (captureButton == null || throwButton == null) return;
+        if (phase == TurnPhase.Cutting) return; // cutting has its own button setup
 
         if (phase == TurnPhase.Selecting && playedCard != null)
         {
@@ -214,14 +218,14 @@ public class GameManager : MonoBehaviour
 
     void OnCaptureClicked()
     {
-        if (phase != TurnPhase.Selecting) return;
-        ConfirmCapture();
+        if (phase == TurnPhase.Cutting) { ApplyKeepChoice(); return; }
+        if (phase == TurnPhase.Selecting) { ConfirmCapture(); return; }
     }
 
     void OnThrowClicked()
     {
-        if (phase != TurnPhase.Selecting) return;
-        ThrowCard();
+        if (phase == TurnPhase.Cutting) { ApplyRejectChoice(); return; }
+        if (phase == TurnPhase.Selecting) { ThrowCard(); return; }
     }
 
     // ---- SETUP ----
@@ -242,20 +246,167 @@ public class GameManager : MonoBehaviour
         playerChkobbas = 0;
         aiChkobbas = 0;
         lastCapturer = "";
+        cuttingCard = null;
+        cuttingDisplayObj = null;
 
         deck = new Deck();
         deck.Shuffle();
 
-        for (int i = 0; i < 3; i++) playerHand.Add(CreateCardObject(deck.Draw(), true));
-        for (int i = 0; i < 3; i++) aiHand.Add(CreateCardObject(deck.Draw(), false));
-        for (int i = 0; i < 4; i++) tableCards.Add(CreateCardObject(deck.Draw(), true));
+        if (roundNumber == 1)
+        {
+            // Round 1: cutting phase
+            StartCuttingPhase();
+        }
+        else
+        {
+            // Rounds 2+: deal hands only, no new table cards
+            DealHands();
+            phase = TurnPhase.Idle;
+            Debug.Log("Round " + roundNumber + " dealt: " + playerHand.Count + " player, " + aiHand.Count + " AI, table=" + tableCards.Count + ", deck=" + deck.Count);
+            SetInstruction("Click a card to play");
+        }
 
-        phase = TurnPhase.Idle;
-        Debug.Log("Dealt: " + playerHand.Count + " player, " + aiHand.Count + " AI, " + tableCards.Count + " table, " + deck.Count + " left");
-        SetInstruction("Click a card to play");
         UpdateScoreDisplay();
         UpdateButtons();
         RenderAll();
+    }
+
+    // ---- CUTTING PHASE (Round 1) ----
+
+    void StartCuttingPhase()
+    {
+        // Reveal one card as cutting card
+        cuttingCard = deck.Draw();
+        // Place it face-up in the center so player can see it
+        cuttingDisplayObj = CreateCardObject(cuttingCard, true);
+        cuttingDisplayObj.transform.position = new Vector3(0, 0.5f, 0);
+        cuttingCard = cuttingDisplayObj.Card; // keep the data ref
+        phase = TurnPhase.Cutting;
+
+        SetInstruction("Cutting card: " + cuttingCard + "    KEEP or REJECT?");
+        UpdateCuttingButtons();
+    }
+
+    void ApplyKeepChoice()
+    {
+        // Destroy the cutting display card
+        var displayObj = FindCuttingDisplay();
+        if (displayObj != null) Destroy(displayObj);
+
+        // Player keeps the cutting card + 2 more = 3 total
+        playerHand.Add(CreateCardObject(cuttingCard, true));
+        playerHand.Add(CreateCardObject(deck.Draw(), true));
+        playerHand.Add(CreateCardObject(deck.Draw(), true));
+
+        // 4 cards face-up on table
+        for (int i = 0; i < 4; i++)
+            tableCards.Add(CreateCardObject(deck.Draw(), true));
+
+        // AI gets 3 cards
+        for (int i = 0; i < 3; i++)
+            aiHand.Add(CreateCardObject(deck.Draw(), false));
+
+        TryReshuffleAndTransition();
+    }
+
+    void ApplyRejectChoice()
+    {
+        var displayObj = FindCuttingDisplay();
+        if (displayObj != null)
+        {
+            // Keep the display card but fold it into table cards properly
+            Destroy(displayObj);
+        }
+
+        // Rejected card goes to table
+        tableCards.Add(CreateCardObject(cuttingCard, true));
+
+        // +3 more to table = 4 total
+        for (int i = 0; i < 3; i++)
+            tableCards.Add(CreateCardObject(deck.Draw(), true));
+
+        // Player gets 3 cards
+        for (int i = 0; i < 3; i++)
+            playerHand.Add(CreateCardObject(deck.Draw(), true));
+
+        // AI gets 3 cards
+        for (int i = 0; i < 3; i++)
+            aiHand.Add(CreateCardObject(deck.Draw(), false));
+
+        TryReshuffleAndTransition();
+    }
+
+    GameObject FindCuttingDisplay()
+    {
+        if (cuttingDisplayObj != null) return cuttingDisplayObj.gameObject;
+        return null;
+    }
+
+    void TryReshuffleAndTransition()
+    {
+        // Reshuffle rule: if 3+ table cards share the same rank, reshuffle and re-deal
+        if (HasThreeSameRank())
+        {
+            Debug.Log("Reshuffle: 3+ cards of same rank on table");
+            // Clean up everything and redo cutting
+            foreach (var c in playerHand) Destroy(c.gameObject);
+            foreach (var c in aiHand) Destroy(c.gameObject);
+            foreach (var c in tableCards) Destroy(c.gameObject);
+            playerHand.Clear();
+            aiHand.Clear();
+            tableCards.Clear();
+
+            deck = new Deck();
+            deck.Shuffle();
+            StartCuttingPhase();
+            RenderAll();
+            return;
+        }
+
+        // Valid layout -- start the game
+        phase = TurnPhase.Idle;
+        Debug.Log("Dealt (cut phase): " + playerHand.Count + " player, " + aiHand.Count + " AI, " + tableCards.Count + " table, " + deck.Count + " left");
+        SetInstruction("Click a card to play");
+        UpdateButtons();
+        RenderAll();
+    }
+
+    bool HasThreeSameRank()
+    {
+        var rankCounts = new Dictionary<Card.Rank, int>();
+        foreach (var tc in tableCards)
+        {
+            int count;
+            rankCounts.TryGetValue(tc.Card.CardRank, out count);
+            rankCounts[tc.Card.CardRank] = count + 1;
+            if (count + 1 >= 3) return true;
+        }
+        return false;
+    }
+
+    void UpdateCuttingButtons()
+    {
+        if (captureButton == null || throwButton == null) return;
+
+        // Repurpose buttons: CAPTURE -> KEEP, THROW -> REJECT
+        captureButton.GetComponent<Image>().color = btnGreen;
+        captureButton.interactable = true;
+        captureButtonText.text = "KEEP";
+
+        throwButton.GetComponent<Image>().color = btnOrange;
+        throwButton.interactable = true;
+        throwButtonText.text = "REJECT";
+    }
+
+    // ---- DEALING (Rounds 2+) ----
+
+    void DealHands()
+    {
+        for (int i = 0; i < 3; i++)
+            playerHand.Add(CreateCardObject(deck.Draw(), true));
+        for (int i = 0; i < 3; i++)
+            aiHand.Add(CreateCardObject(deck.Draw(), false));
+        // No new table cards in rounds 2+
     }
 
     CardObject CreateCardObject(Card card, bool faceUp)
@@ -600,7 +751,7 @@ public class GameManager : MonoBehaviour
         if (pD > aD) pPts++;
         else if (aD > pD) aPts++;
 
-        // 3. Primiera Ã¢â‚¬â€ most sevens, tiebreak with sixes
+        // 3. Primiera ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â most sevens, tiebreak with sixes
         int p7 = CountRank(playerCaptured, Card.Rank.Seven);
         int a7 = CountRank(aiCaptured, Card.Rank.Seven);
         if (p7 > a7) pPts++;
@@ -650,6 +801,7 @@ public class GameManager : MonoBehaviour
 
     void NewRound()
     {
+        roundNumber++;
         StartRound();
     }
 
