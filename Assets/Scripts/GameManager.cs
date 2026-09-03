@@ -54,6 +54,7 @@ public class GameManager : MonoBehaviour
     private int aiScore;
     private string lastCapturer = ""; // "player" or "ai"
     private int roundNumber = 1;
+    private bool playerIsDealer = false; // player is cutter in round 1, alternates
     private Card cuttingCard; // the card revealed during cutting phase
     private CardObject cuttingDisplayObj; // cached reference to cutting display card
     private const int targetScore = 11;
@@ -261,9 +262,22 @@ public class GameManager : MonoBehaviour
         {
             // Rounds 2+: deal hands only, no new table cards
             DealHands();
-            phase = TurnPhase.Idle;
-            Debug.Log("Round " + roundNumber + " dealt: " + playerHand.Count + " player, " + aiHand.Count + " AI, table=" + tableCards.Count + ", deck=" + deck.Count);
-            SetInstruction("Click a card to play");
+            bool cutterGoesFirst = !playerIsDealer; // cutter plays first
+            if (cutterGoesFirst)
+            {
+                // Player is cutter -> player goes first
+                phase = TurnPhase.Idle;
+                Debug.Log("[DEAL] Round " + roundNumber + " | You are cutter - you play first | hands " + playerHand.Count + "/" + aiHand.Count + " | table " + tableCards.Count + " | deck " + deck.Count);
+                SetInstruction("Click a card to play");
+            }
+            else
+            {
+                // AI is cutter -> AI goes first
+                Debug.Log("[DEAL] Round " + roundNumber + " | AI is cutter - AI plays first | hands " + playerHand.Count + "/" + aiHand.Count + " | table " + tableCards.Count + " | deck " + deck.Count);
+                SetInstruction("AI turn (AI is cutter)...");
+                phase = TurnPhase.AiTurn;
+                Invoke(nameof(AiTurn), 1f);
+            }
         }
 
         UpdateScoreDisplay();
@@ -347,7 +361,7 @@ public class GameManager : MonoBehaviour
         // Reshuffle rule: if 3+ table cards share the same rank, reshuffle and re-deal
         if (HasThreeSameRank())
         {
-            Debug.Log("Reshuffle: 3+ cards of same rank on table");
+            Debug.Log("[DEAL] Reshuffle - 3+ cards of same rank on table");
             // Clean up everything and redo cutting
             foreach (var c in playerHand) Destroy(c.gameObject);
             foreach (var c in aiHand) Destroy(c.gameObject);
@@ -365,7 +379,7 @@ public class GameManager : MonoBehaviour
 
         // Valid layout -- start the game
         phase = TurnPhase.Idle;
-        Debug.Log("Dealt (cut phase): " + playerHand.Count + " player, " + aiHand.Count + " AI, " + tableCards.Count + " table, " + deck.Count + " left");
+        Debug.Log("[DEAL] Cut phase resolved | hands " + playerHand.Count + "/" + aiHand.Count + " | table " + tableCards.Count + " | deck " + deck.Count);
         SetInstruction("Click a card to play");
         UpdateButtons();
         RenderAll();
@@ -402,11 +416,12 @@ public class GameManager : MonoBehaviour
 
     void DealHands()
     {
-        for (int i = 0; i < 3; i++)
+        int toDeal = Mathf.Min(3, deck.Count / 2);
+        for (int i = 0; i < toDeal; i++)
+        {
             playerHand.Add(CreateCardObject(deck.Draw(), true));
-        for (int i = 0; i < 3; i++)
             aiHand.Add(CreateCardObject(deck.Draw(), false));
-        // No new table cards in rounds 2+
+        }
     }
 
     CardObject CreateCardObject(Card card, bool faceUp)
@@ -468,6 +483,7 @@ public class GameManager : MonoBehaviour
         card.SetSelected(true);
         selectedTable.Clear();
         phase = TurnPhase.Selecting;
+        Debug.Log("[PLAYER] Played " + card.Card.ValueName);
 
         foreach (var c in playerHand) c.SetDim(true);
         foreach (var c in aiHand) c.SetDim(true);
@@ -522,7 +538,7 @@ public class GameManager : MonoBehaviour
             }
             if (singleExists)
             {
-                Debug.Log("Cannot combo: single match exists (mandatory single-card capture)");
+                Debug.Log("[PLAYER] Combo rejected - single match exists, must capture single card");
                 SetInstruction("Single match exists! Select just one card.");
                 foreach (var c in selectedTable) c.SetSelected(false);
                 selectedTable.Clear();
@@ -536,6 +552,7 @@ public class GameManager : MonoBehaviour
 
     void ThrowCard()
     {
+        Debug.Log("[PLAYER] Threw " + playedCard.Card.ValueName + " (no capture)");
         phase = TurnPhase.AiTurn;
         CleanupSelection();
         SetInstruction("Thrown! AI turn...");
@@ -563,8 +580,17 @@ public class GameManager : MonoBehaviour
 
         if (tableCards.Count == 0)
         {
-            playerChkobbas++;
-            Debug.Log("Player CHKOBBA!");
+            bool blocked = deck.Count == 0 && aiHand.Count == 0 && playerIsDealer;
+            playedCard.Card.IsChkobba = true;
+            if (blocked)
+            {
+                Debug.Log("[PLAYER] Chkobba BLOCKED - dealer last-card rule (marked, no bonus point)");
+            }
+            else
+            {
+                playerChkobbas++;
+                Debug.Log("[PLAYER] CHKOBBA! Table swept");
+            }
             SetInstruction("CHKOBBA! AI turn...");
         }
         else
@@ -572,8 +598,11 @@ public class GameManager : MonoBehaviour
             SetInstruction("Captured " + (captures.Count + 1) + " cards. AI turn...");
         }
 
+        string capturedNames = "";
+        foreach (var c in captures) capturedNames += c.Card.ValueName + " ";
+        Debug.Log("[PLAYER] Captured " + playedCard.Card.ValueName + " + [" + capturedNames.TrimEnd(' ', ',') + "] | pile " + playerCaptured.Count + " vs " + aiCaptured.Count);
+
         CleanupSelection();
-        Debug.Log("Player captured. Pile: player=" + playerCaptured.Count + " AI=" + aiCaptured.Count);
         UpdateButtons();
         RenderAll();
         Invoke(nameof(AiTurn), 1f);
@@ -629,8 +658,17 @@ public class GameManager : MonoBehaviour
 
             if (tableCards.Count == 0)
             {
-                aiChkobbas++;
-                Debug.Log("AI CHKOBBA!");
+                bool blocked = deck.Count == 0 && playerHand.Count == 0 && playerIsDealer;
+                card.Card.IsChkobba = true;
+                if (blocked)
+                {
+                    Debug.Log("[AI] Chkobba BLOCKED - dealer last-card rule (marked, no bonus point)");
+                }
+                else
+                {
+                    aiChkobbas++;
+                    Debug.Log("[AI] CHKOBBA! Table swept");
+                }
                 SetInstruction("AI CHKOBBA! Your turn...");
             }
             else
@@ -638,13 +676,15 @@ public class GameManager : MonoBehaviour
                 SetInstruction("AI captured " + (capture.Count + 1) + " cards. Your turn...");
             }
 
-            Debug.Log("AI captured. Pile: player=" + playerCaptured.Count + " AI=" + aiCaptured.Count);
+            string aiCapturedNames = "";
+            foreach (var c in capture) aiCapturedNames += c.Card.ValueName + " ";
+            Debug.Log("[AI] Captured " + card.Card.ValueName + " + [" + aiCapturedNames.TrimEnd(' ', ',') + "] | pile " + playerCaptured.Count + " vs " + aiCaptured.Count);
         }
         else
         {
             tableCards.Add(card);
             SetInstruction("AI played " + card.Card + ". Your turn...");
-            Debug.Log("AI played " + card.Card + " -- no capture. Table: " + tableCards.Count);
+            Debug.Log("[AI] Threw " + card.Card.ValueName + " (no capture) | table " + tableCards.Count);
         }
 
         if (playerHand.Count == 0 && aiHand.Count == 0)
@@ -713,14 +753,14 @@ public class GameManager : MonoBehaviour
     {
         if (deck.Count == 0) return;
 
-        int toDeal = Mathf.Min(3, deck.Count);
+        int toDeal = Mathf.Min(3, deck.Count / 2);
         for (int i = 0; i < toDeal; i++)
         {
             playerHand.Add(CreateCardObject(deck.Draw(), true));
             aiHand.Add(CreateCardObject(deck.Draw(), false));
         }
 
-        Debug.Log("Re-dealt " + toDeal + " cards each. Deck remaining: " + deck.Count);
+        Debug.Log("[DEAL] Re-deal " + toDeal + " cards each | deck remaining " + deck.Count);
         RenderAll();
     }
 
@@ -735,58 +775,69 @@ public class GameManager : MonoBehaviour
         {
             var targetPile = lastCapturer == "player" ? playerCaptured : aiCaptured;
             foreach (var tc in tableCards) targetPile.Add(tc.Card);
+            Debug.Log("[SCORE] " + (lastCapturer == "player" ? "You" : "AI") + " swept remaining " + tableCards.Count + " table cards (last capturer, not a chkobba)");
         }
         foreach (var tc in tableCards) Destroy(tc.gameObject);
         tableCards.Clear();
 
         int pPts = 0, aPts = 0;
+        var bits = new List<string>();
 
         // 1. Most cards captured
-        if (playerCaptured.Count > aiCaptured.Count) pPts++;
-        else if (aiCaptured.Count > playerCaptured.Count) aPts++;
+        if (playerCaptured.Count > aiCaptured.Count) { pPts++; bits.Add("cards " + playerCaptured.Count + "-" + aiCaptured.Count + " (You)"); }
+        else if (aiCaptured.Count > playerCaptured.Count) { aPts++; bits.Add("cards " + playerCaptured.Count + "-" + aiCaptured.Count + " (AI)"); }
 
         // 2. Most diamonds
         int pD = CountSuit(playerCaptured, Card.Suit.Diamonds);
         int aD = CountSuit(aiCaptured, Card.Suit.Diamonds);
-        if (pD > aD) pPts++;
-        else if (aD > pD) aPts++;
+        if (pD > aD) { pPts++; bits.Add("diamonds " + pD + "-" + aD + " (You)"); }
+        else if (aD > pD) { aPts++; bits.Add("diamonds " + pD + "-" + aD + " (AI)"); }
 
-        // 3. Primiera ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â most sevens, tiebreak with sixes
+        // 3. Primiera - most sevens, tiebreak with sixes
         int p7 = CountRank(playerCaptured, Card.Rank.Seven);
         int a7 = CountRank(aiCaptured, Card.Rank.Seven);
-        if (p7 > a7) pPts++;
-        else if (a7 > p7) aPts++;
+        if (p7 > a7) { pPts++; bits.Add("sevens " + p7 + "-" + a7 + " (You)"); }
+        else if (a7 > p7) { aPts++; bits.Add("sevens " + p7 + "-" + a7 + " (AI)"); }
         else
         {
             int p6 = CountRank(playerCaptured, Card.Rank.Six);
             int a6 = CountRank(aiCaptured, Card.Rank.Six);
-            if (p6 > a6) pPts++;
-            else if (a6 > p6) aPts++;
+            if (p6 > a6) { pPts++; bits.Add("sevens tie, sixes " + p6 + "-" + a6 + " (You)"); }
+            else if (a6 > p6) { aPts++; bits.Add("sevens tie, sixes " + p6 + "-" + a6 + " (AI)"); }
         }
 
         // 4. Seven of Diamonds
-        if (HasSevenOfDiamonds(playerCaptured)) pPts++;
-        if (HasSevenOfDiamonds(aiCaptured)) aPts++;
+        if (HasSevenOfDiamonds(playerCaptured)) { pPts++; bits.Add("7 of diamonds (You)"); }
+        if (HasSevenOfDiamonds(aiCaptured)) { aPts++; bits.Add("7 of diamonds (AI)"); }
 
         // 5. Chkobba bonuses
         pPts += playerChkobbas;
         aPts += aiChkobbas;
+        if (playerChkobbas > 0 || aiChkobbas > 0)
+            bits.Add("chkobba +" + playerChkobbas + " You, +" + aiChkobbas + " AI");
 
         playerScore += pPts;
         aiScore += aPts;
 
-        Debug.Log("Round score: You " + pPts + " - AI " + aPts);
-        Debug.Log("Game score: You " + playerScore + " - AI " + aiScore);
+        Debug.Log("[SCORE] Round " + roundNumber + " | You " + pPts + " - AI " + aPts + " | " + string.Join(", ", bits));
+        Debug.Log("[SCORE] Game | You " + playerScore + " - AI " + aiScore + " | target " + targetScore);
         UpdateScoreDisplay();
 
         if (playerScore >= targetScore || aiScore >= targetScore)
         {
             if (playerScore > aiScore)
+            {
+                Debug.Log("[SCORE] GAME OVER - You win " + playerScore + "-" + aiScore);
                 SetInstruction("YOU WIN!  Final: You " + playerScore + " - AI " + aiScore);
+            }
             else if (aiScore > playerScore)
+            {
+                Debug.Log("[SCORE] GAME OVER - AI wins " + aiScore + "-" + playerScore);
                 SetInstruction("AI WINS!  Final: You " + playerScore + " - AI " + aiScore);
+            }
             else
             {
+                Debug.Log("[SCORE] Tie at " + targetScore + " - playing an extra round");
                 SetInstruction("Tie at " + targetScore + "! Extra round...");
                 Invoke(nameof(NewRound), 2f);
             }
@@ -802,6 +853,7 @@ public class GameManager : MonoBehaviour
     void NewRound()
     {
         roundNumber++;
+        playerIsDealer = !playerIsDealer;
         StartRound();
     }
 

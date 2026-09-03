@@ -36,8 +36,30 @@ public class Card
     public Rank CardRank { get; private set; }
 
     // ---- COMPUTED VALUE ----
-    // Value is derived from Rank — no separate backing field
+    // Value is derived from Rank - no separate backing field
     public int Value => (int)CardRank;
+    public bool IsChkobba { get; set; }
+
+    /// <summary>
+    /// Short display name for logs: rank + suit symbol, e.g. "7\u2666".
+    /// Suit symbols use unicode escapes so this file stays pure ASCII.
+    /// </summary>
+    public string ValueName
+    {
+        get
+        {
+            string r = CardRank == Card.Rank.Ace ? "A"
+                     : CardRank == Card.Rank.Queen ? "Q"
+                     : CardRank == Card.Rank.Jack ? "J"
+                     : CardRank == Card.Rank.King ? "K"
+                     : ((int)CardRank).ToString();
+            char s = CardSuit == Card.Suit.Diamonds ? '\u2666'
+                   : CardSuit == Card.Suit.Hearts ? '\u2665'
+                   : CardSuit == Card.Suit.Clubs ? '\u2663'
+                   : '\u2660';
+            return r + s;
+        }
+    }
 
     // ---- CONSTRUCTOR ----
     public Card(Suit suit, Rank rank)
