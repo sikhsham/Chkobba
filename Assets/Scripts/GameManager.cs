@@ -59,6 +59,11 @@ public class GameManager : MonoBehaviour
     private CardObject cuttingDisplayObj; // cached reference to cutting display card
     private const int targetScore = 11;
 
+    // Menu / game-over overlays
+    private CanvasGroup menuPanel;
+    private CanvasGroup gameOverPanel;
+    private Text gameOverText;
+
     // UI elements
     private Text instructionText;
     private Text scoreText;
@@ -80,7 +85,7 @@ public class GameManager : MonoBehaviour
     {
         CreateUI();
         UpdateButtons();
-        StartRound();
+        ShowMenu();
     }
 
     // ---- UI CREATION ----
@@ -136,6 +141,9 @@ public class GameManager : MonoBehaviour
             new Vector2(-120, 30), new Vector2(160, 50),
             OnThrowClicked);
         throwButtonText = throwButton.GetComponentInChildren<Text>();
+
+        CreateMenuUI();
+        CreateGameOverUI();
     }
 
     Button CreateActionBtn(GameObject canvas, string name, string label,
@@ -219,14 +227,168 @@ public class GameManager : MonoBehaviour
 
     void OnCaptureClicked()
     {
-        if (phase == TurnPhase.Cutting) { ApplyKeepChoice(); return; }
+        if (phase == TurnPhase.Cutting && !playerIsDealer) { ApplyCut(true); return; }
         if (phase == TurnPhase.Selecting) { ConfirmCapture(); return; }
     }
 
     void OnThrowClicked()
     {
-        if (phase == TurnPhase.Cutting) { ApplyRejectChoice(); return; }
+        if (phase == TurnPhase.Cutting && !playerIsDealer) { ApplyCut(false); return; }
         if (phase == TurnPhase.Selecting) { ThrowCard(); return; }
+    }
+
+    // ---- MENU & GAME OVER ----
+
+    CanvasGroup CreateOverlayPanel(GameObject canvas, string name)
+    {
+        var obj = new GameObject(name);
+        obj.transform.SetParent(canvas.transform, false);
+        var img = obj.AddComponent<Image>();
+        img.color = new Color(0f, 0.25f, 0.12f, 0.97f);
+        img.raycastTarget = true;
+        var rect = obj.GetComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+
+        var group = obj.AddComponent<CanvasGroup>();
+        group.alpha = 0f;
+        group.interactable = false;
+        group.blocksRaycasts = false;
+        return group;
+    }
+
+    Text MenuText(Transform parent, string name, string msg, int size, FontStyle style, Vector2 pos)
+    {
+        var obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+        var t = obj.AddComponent<Text>();
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.fontSize = size;
+        t.fontStyle = style;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.color = Color.white;
+        t.text = msg;
+        var r = obj.GetComponent<RectTransform>();
+        r.anchorMin = new Vector2(0.5f, 0.5f);
+        r.anchorMax = new Vector2(0.5f, 0.5f);
+        r.anchoredPosition = pos;
+        r.sizeDelta = new Vector2(900, size * 2);
+        obj.AddComponent<Outline>();
+        return t;
+    }
+
+    Button MenuButton(Transform parent, string name, string label, Vector2 pos, Vector2 size, Color color, UnityEngine.Events.UnityAction onClick)
+    {
+        var obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+        var img = obj.AddComponent<Image>();
+        img.color = color;
+        var btn = obj.AddComponent<Button>();
+        btn.targetGraphic = img;
+        btn.onClick.AddListener(onClick);
+        var rect = obj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = pos;
+        rect.sizeDelta = size;
+
+        var labelObj = new GameObject("Label");
+        labelObj.transform.SetParent(obj.transform, false);
+        var txt = labelObj.AddComponent<Text>();
+        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        txt.fontSize = 32;
+        txt.fontStyle = FontStyle.Bold;
+        txt.alignment = TextAnchor.MiddleCenter;
+        txt.color = Color.white;
+        txt.text = label;
+        var lr = labelObj.GetComponent<RectTransform>();
+        lr.anchorMin = Vector2.zero;
+        lr.anchorMax = Vector2.one;
+        lr.sizeDelta = Vector2.zero;
+        return btn;
+    }
+
+    void CreateMenuUI()
+    {
+        var canvas = GameObject.Find("Canvas");
+        if (canvas == null) return;
+        menuPanel = CreateOverlayPanel(canvas, "MenuPanel");
+
+        MenuText(menuPanel.transform, "MenuTitle", "CHKOBBA", 80, FontStyle.Bold, new Vector2(0, 150));
+        MenuText(menuPanel.transform, "MenuSubtitle", "a TunToon game", 26, FontStyle.Italic, new Vector2(0, 60));
+        MenuButton(menuPanel.transform, "PlayBtn", "PLAY", new Vector2(0, -80), new Vector2(340, 90), btnGreen, OnMenuPlay);
+        MenuButton(menuPanel.transform, "QuitBtn", "QUIT", new Vector2(0, -200), new Vector2(340, 70), btnGray, OnMenuQuit);
+    }
+
+    void CreateGameOverUI()
+    {
+        var canvas = GameObject.Find("Canvas");
+        if (canvas == null) return;
+        gameOverPanel = CreateOverlayPanel(canvas, "GameOverPanel");
+
+        gameOverText = MenuText(gameOverPanel.transform, "GameOverTitle", "", 56, FontStyle.Bold, new Vector2(0, 120));
+        MenuButton(gameOverPanel.transform, "PlayAgainBtn", "PLAY AGAIN", new Vector2(0, -80), new Vector2(340, 90), btnGreen, OnGameOverPlayAgain);
+        MenuButton(gameOverPanel.transform, "MenuBtn", "MAIN MENU", new Vector2(0, -200), new Vector2(340, 70), btnOrange, OnGameOverMenu);
+    }
+
+    void SetPanelVisible(CanvasGroup panel, bool on)
+    {
+        panel.alpha = on ? 1f : 0f;
+        panel.interactable = on;
+        panel.blocksRaycasts = on;
+    }
+
+    void ShowMenu()
+    {
+        SetPanelVisible(menuPanel, true);
+        SetPanelVisible(gameOverPanel, false);
+        phase = TurnPhase.Idle;
+        SetInstruction("");
+    }
+
+    void ResetMatch()
+    {
+        playerScore = 0;
+        aiScore = 0;
+        roundNumber = 1;
+        playerIsDealer = false;
+    }
+
+    void OnMenuPlay()
+    {
+        SetPanelVisible(menuPanel, false);
+        ResetMatch();
+        StartRound();
+    }
+
+    void OnMenuQuit()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
+    }
+
+    void ShowGameOver(string result)
+    {
+        gameOverText.text = result + "\n" + playerScore + " - " + aiScore;
+        SetPanelVisible(gameOverPanel, true);
+    }
+
+    void OnGameOverPlayAgain()
+    {
+        SetPanelVisible(gameOverPanel, false);
+        ResetMatch();
+        StartRound();
+    }
+
+    void OnGameOverMenu()
+    {
+        SetPanelVisible(gameOverPanel, false);
+        ShowMenu();
     }
 
     // ---- SETUP ----
@@ -253,39 +415,15 @@ public class GameManager : MonoBehaviour
         deck = new Deck();
         deck.Shuffle();
 
-        if (roundNumber == 1)
-        {
-            // Round 1: cutting phase
-            StartCuttingPhase();
-        }
-        else
-        {
-            // Rounds 2+: deal hands only, no new table cards
-            DealHands();
-            bool cutterGoesFirst = !playerIsDealer; // cutter plays first
-            if (cutterGoesFirst)
-            {
-                // Player is cutter -> player goes first
-                phase = TurnPhase.Idle;
-                Debug.Log("[DEAL] Round " + roundNumber + " | You are cutter - you play first | hands " + playerHand.Count + "/" + aiHand.Count + " | table " + tableCards.Count + " | deck " + deck.Count);
-                SetInstruction("Click a card to play");
-            }
-            else
-            {
-                // AI is cutter -> AI goes first
-                Debug.Log("[DEAL] Round " + roundNumber + " | AI is cutter - AI plays first | hands " + playerHand.Count + "/" + aiHand.Count + " | table " + tableCards.Count + " | deck " + deck.Count);
-                SetInstruction("AI turn (AI is cutter)...");
-                phase = TurnPhase.AiTurn;
-                Invoke(nameof(AiTurn), 1f);
-            }
-        }
+        // Every round starts with the cut -- the cutter alternates between rounds
+        StartCuttingPhase();
 
         UpdateScoreDisplay();
         UpdateButtons();
         RenderAll();
     }
 
-    // ---- CUTTING PHASE (Round 1) ----
+    // ---- CUTTING PHASE (every round, cutter alternates) ----
 
     void StartCuttingPhase()
     {
@@ -297,55 +435,71 @@ public class GameManager : MonoBehaviour
         cuttingCard = cuttingDisplayObj.Card; // keep the data ref
         phase = TurnPhase.Cutting;
 
-        SetInstruction("Cutting card: " + cuttingCard + "    KEEP or REJECT?");
-        UpdateCuttingButtons();
+        if (playerIsDealer)
+        {
+            // AI is the cutter - it decides after a short pause
+            Debug.Log("[CUT] Round " + roundNumber + " | AI cuts " + cuttingCard.ValueName);
+            SetInstruction("AI cuts: " + cuttingCard.ValueName + " ...");
+            UpdateButtons();
+            Invoke(nameof(ApplyAiCut), 1.5f);
+        }
+        else
+        {
+            Debug.Log("[CUT] Round " + roundNumber + " | You cut " + cuttingCard.ValueName + " - KEEP or REJECT?");
+            SetInstruction("Cutting card: " + cuttingCard + "    KEEP or REJECT?");
+            UpdateCuttingButtons();
+        }
     }
 
-    void ApplyKeepChoice()
+    void ApplyAiCut()
     {
-        // Destroy the cutting display card
+        // Simple heuristic: keep the cut card when it is worth capturing with (value 5+)
+        bool keep = cuttingCard.Value >= 5;
+        Debug.Log("[CUT] AI " + (keep ? "KEEPS" : "REJECTS") + " " + cuttingCard.ValueName);
+        SetInstruction("AI " + (keep ? "kept" : "rejected") + " " + cuttingCard.ValueName);
+        ApplyCut(keep);
+    }
+
+    void ApplyCut(bool cutterKeeps)
+    {
+        bool playerCuts = !playerIsDealer;
+        var cutterHand = playerCuts ? playerHand : aiHand;
+        var dealerHand = playerCuts ? aiHand : playerHand;
+        bool cutterFaceUp = playerCuts; // the AI's hand cards stay face-down
+
         var displayObj = FindCuttingDisplay();
         if (displayObj != null) Destroy(displayObj);
 
-        // Player keeps the cutting card + 2 more = 3 total
-        playerHand.Add(CreateCardObject(cuttingCard, true));
-        playerHand.Add(CreateCardObject(deck.Draw(), true));
-        playerHand.Add(CreateCardObject(deck.Draw(), true));
-
-        // 4 cards face-up on table
-        for (int i = 0; i < 4; i++)
-            tableCards.Add(CreateCardObject(deck.Draw(), true));
-
-        // AI gets 3 cards
-        for (int i = 0; i < 3; i++)
-            aiHand.Add(CreateCardObject(deck.Draw(), false));
-
-        TryReshuffleAndTransition();
-    }
-
-    void ApplyRejectChoice()
-    {
-        var displayObj = FindCuttingDisplay();
-        if (displayObj != null)
+        if (cutterKeeps)
         {
-            // Keep the display card but fold it into table cards properly
-            Destroy(displayObj);
+            Debug.Log("[CUT] " + (playerCuts ? "You" : "AI") + " KEPT " + cuttingCard.ValueName);
+            // Cutter keeps the cutting card + 2 more = 3 total
+            cutterHand.Add(CreateCardObject(cuttingCard, cutterFaceUp));
+            cutterHand.Add(CreateCardObject(deck.Draw(), cutterFaceUp));
+            cutterHand.Add(CreateCardObject(deck.Draw(), cutterFaceUp));
+
+            // 4 cards face-up on table
+            for (int i = 0; i < 4; i++)
+                tableCards.Add(CreateCardObject(deck.Draw(), true));
+        }
+        else
+        {
+            Debug.Log("[CUT] " + (playerCuts ? "You" : "AI") + " REJECTED " + cuttingCard.ValueName + " - it goes to the table");
+            // Rejected card goes to table, +3 more to table = 4 total
+            tableCards.Add(CreateCardObject(cuttingCard, true));
+            for (int i = 0; i < 3; i++)
+                tableCards.Add(CreateCardObject(deck.Draw(), true));
+
+            // Cutter gets 3 fresh cards
+            cutterHand.Add(CreateCardObject(deck.Draw(), cutterFaceUp));
+            cutterHand.Add(CreateCardObject(deck.Draw(), cutterFaceUp));
+            cutterHand.Add(CreateCardObject(deck.Draw(), cutterFaceUp));
         }
 
-        // Rejected card goes to table
-        tableCards.Add(CreateCardObject(cuttingCard, true));
-
-        // +3 more to table = 4 total
-        for (int i = 0; i < 3; i++)
-            tableCards.Add(CreateCardObject(deck.Draw(), true));
-
-        // Player gets 3 cards
-        for (int i = 0; i < 3; i++)
-            playerHand.Add(CreateCardObject(deck.Draw(), true));
-
-        // AI gets 3 cards
-        for (int i = 0; i < 3; i++)
-            aiHand.Add(CreateCardObject(deck.Draw(), false));
+        // Dealer takes 3 cards
+        dealerHand.Add(CreateCardObject(deck.Draw(), !cutterFaceUp));
+        dealerHand.Add(CreateCardObject(deck.Draw(), !cutterFaceUp));
+        dealerHand.Add(CreateCardObject(deck.Draw(), !cutterFaceUp));
 
         TryReshuffleAndTransition();
     }
@@ -377,10 +531,20 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        // Valid layout -- start the game
-        phase = TurnPhase.Idle;
-        Debug.Log("[DEAL] Cut phase resolved | hands " + playerHand.Count + "/" + aiHand.Count + " | table " + tableCards.Count + " | deck " + deck.Count);
-        SetInstruction("Click a card to play");
+        // Valid layout -- start the game (the cutter plays first)
+        if (!playerIsDealer)
+        {
+            phase = TurnPhase.Idle;
+            Debug.Log("[DEAL] Round " + roundNumber + " resolved | hands " + playerHand.Count + "/" + aiHand.Count + " | table " + tableCards.Count + " | deck " + deck.Count + " | you play first");
+            SetInstruction("Click a card to play");
+        }
+        else
+        {
+            phase = TurnPhase.AiTurn;
+            Debug.Log("[DEAL] Round " + roundNumber + " resolved | hands " + playerHand.Count + "/" + aiHand.Count + " | table " + tableCards.Count + " | deck " + deck.Count + " | AI plays first");
+            SetInstruction("AI turn...");
+            Invoke(nameof(AiTurn), 1f);
+        }
         UpdateButtons();
         RenderAll();
     }
@@ -410,18 +574,6 @@ public class GameManager : MonoBehaviour
         throwButton.GetComponent<Image>().color = btnOrange;
         throwButton.interactable = true;
         throwButtonText.text = "REJECT";
-    }
-
-    // ---- DEALING (Rounds 2+) ----
-
-    void DealHands()
-    {
-        int toDeal = Mathf.Min(3, deck.Count / 2);
-        for (int i = 0; i < toDeal; i++)
-        {
-            playerHand.Add(CreateCardObject(deck.Draw(), true));
-            aiHand.Add(CreateCardObject(deck.Draw(), false));
-        }
     }
 
     CardObject CreateCardObject(Card card, bool faceUp)
@@ -747,7 +899,7 @@ public class GameManager : MonoBehaviour
         return aiHand[0];
     }
 
-    // ---- RE-DEAL ----
+    // ---- RE-DEAL (hands empty, deck still has cards) ----
 
     void TryReDeal()
     {
@@ -760,7 +912,7 @@ public class GameManager : MonoBehaviour
             aiHand.Add(CreateCardObject(deck.Draw(), false));
         }
 
-        Debug.Log("[DEAL] Re-deal " + toDeal + " cards each | deck remaining " + deck.Count);
+        Debug.Log("[DEAL] Re-dealt " + toDeal + " cards each | deck remaining " + deck.Count);
         RenderAll();
     }
 
@@ -828,12 +980,12 @@ public class GameManager : MonoBehaviour
             if (playerScore > aiScore)
             {
                 Debug.Log("[SCORE] GAME OVER - You win " + playerScore + "-" + aiScore);
-                SetInstruction("YOU WIN!  Final: You " + playerScore + " - AI " + aiScore);
+                ShowGameOver("YOU WIN!");
             }
             else if (aiScore > playerScore)
             {
                 Debug.Log("[SCORE] GAME OVER - AI wins " + aiScore + "-" + playerScore);
-                SetInstruction("AI WINS!  Final: You " + playerScore + " - AI " + aiScore);
+                ShowGameOver("AI WINS");
             }
             else
             {

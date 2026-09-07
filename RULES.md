@@ -1,4 +1,6 @@
-# Chkobba — Locked Ruleset (v1)
+# Chkobba - Locked Ruleset (v1.1)
+
+> **v1.1 revision (2026-09-07):** Every round starts with a cut (the cutter alternates between rounds) and a fresh 4-card table layout from a fresh shuffled deck - confirmed by Aymen against real-life play, superseding the v1 "cutting is round 1 only / no new table cards" rules. Within a round, when all hand cards are played, 3 more cards are dealt to each player (no new table cards) until the deck is exhausted; then the round ends with the Final Sweep and scoring.
 
 **Status:** Locked for Phase 1 development
 **Scope:** **1v1 (Human vs AI) only.** 2v2 (team mode) is a planned v2 feature and will require additional rules to be researched and documented separately.
@@ -69,12 +71,12 @@ If the face-up layout (4 cards on table) contains **3 or 4 cards of the same ran
 
 ## 5. Dealing (Rounds 2+)
 
-No cutting phase. Each round:
+Each round starts with a fresh shuffled deck and a cut (the cutter alternates between rounds). After the cut resolves:
 1. Dealer gives 3 cards to opponent (cutter)
 2. Dealer takes 3 cards for themselves
 3. **No new cards added to the table** — only hands are replenished
 
-The round continues until the deck is exhausted and all cards have been played.
+Hands are then played. When all hand cards are played, deal another 3 to each player (no new table cards) and continue. When the deck is exhausted and all cards have been played, the round ends (Final Sweep Rule + scoring) and the next round begins. Rounds repeat until a player reaches 11 points.
 
 ---
 
@@ -105,8 +107,10 @@ The played card can capture if it matches either:
 The played card stays on the table, added to the layout. No cards are captured this turn.
 
 ### After All 3 Cards Played
-- Deal another 3 cards to each player (no cards to table)
-- Continue until deck is exhausted
+- Deal another 3 cards to each player (no new cards to the table)
+- Continue until the deck is exhausted, then the round ends: Final Sweep + scoring
+- A new round begins (fresh deck, cut, fresh table layout)
+- Rounds repeat until a player/team reaches 11 points
 
 ---
 
@@ -162,7 +166,7 @@ Points are awarded after all cards have been played (end of round). Four scoring
 - 2 players × 3 cards per deal = 6 cards per deal
 - 4 cards initial table layout
 - Total table cards over the game: 4 initial + 34 remaining = 38 (after first deal, 34 cards remain)
-- Wait — let me recalculate: 40 cards total. Round 1: 3 to cutter + 3 to dealer + 4 to table = 10 cards in play. 30 cards remain in deck. Round 2-6: 3+3=6 cards per round × 5 rounds = 30 cards. So 6 rounds total (1 initial + 5 follow-up). All 40 cards get played.
+- Round model (v1.1): each round starts with a fresh 40-card deck (cut + 3/3 hands + 4 table = 10 cards in play, 30 left in the deck). The deck then feeds 3+3 re-deals until exhausted (exactly 5 re-deals, never uneven), which ends the round. Rounds repeat until a player reaches 11 points.
 
 ### Memory Aid for AI Implementation
 - Track: deck, player hand (3 cards), AI hand (3 cards), table layout (variable 0-N cards), captured piles (player + AI), Chkobba counts
