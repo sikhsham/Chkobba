@@ -26,3 +26,9 @@ Thumbs.db
 # Builds
 *.apk
 *.aab
+
+# Unity build artifacts (regenerated every build)
+*_BurstDebugInformation_DoNotShip/
+*_BackUpThisFolder_ButDontShipItWithYourGame/
+.utmp/
+# Windows recycle bin helper$null = 0
