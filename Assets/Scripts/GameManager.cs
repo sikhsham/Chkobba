@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using System.Collections;
 using System.Collections.Generic;
 
 /// <summary>
@@ -71,6 +72,11 @@ public class GameManager : MonoBehaviour
     private Button throwButton;
     private Text captureButtonText;
     private Text throwButtonText;
+
+    // Card fx
+    private bool fxRunning;
+    private static readonly Vector3 aiPilePos = new Vector3(6.5f, 3.2f, 0);
+    private static readonly Vector3 playerPilePos = new Vector3(6.5f, -3.2f, 0);
 
     private static readonly Color btnGreen  = new Color(0.2f, 0.8f, 0.2f);
     private static readonly Color btnOrange = new Color(1f, 0.6f, 0.1f);
@@ -431,7 +437,7 @@ public class GameManager : MonoBehaviour
         cuttingCard = deck.Draw();
         // Place it face-up in the center so player can see it
         cuttingDisplayObj = CreateCardObject(cuttingCard, true);
-        cuttingDisplayObj.transform.position = new Vector3(0, 0.5f, 0);
+        cuttingDisplayObj.TweenTo(new Vector3(0, 0.5f, 0), 0.3f);
         cuttingCard = cuttingDisplayObj.Card; // keep the data ref
         phase = TurnPhase.Cutting;
 
@@ -585,6 +591,7 @@ public class GameManager : MonoBehaviour
         sr.sprite = faceUp ? CardSpriteLoader.GetSpriteForCard(card) : CardSpriteLoader.GetCardBackSprite();
         obj.transform.localScale = new Vector3(cardScale, cardScale, 1);
         obj.AddComponent<BoxCollider2D>();
+        obj.transform.position = new Vector3(8f, 0f, 0); // spawn at the deck corner, tweens into place
         co.InitColor();
         return co;
     }
@@ -593,6 +600,7 @@ public class GameManager : MonoBehaviour
 
     public void OnCardClicked(CardObject card)
     {
+        if (fxRunning) return;
         if (phase == TurnPhase.Selecting)
         {
             // Click the played card again -> deselect, go back to idle, return card to hand
@@ -722,12 +730,10 @@ public class GameManager : MonoBehaviour
         {
             playerCaptured.Add(tc.Card);
             tableCards.Remove(tc);
-            Destroy(tc.gameObject);
         }
 
         playerCaptured.Add(playedCard.Card);
         tableCards.Remove(playedCard);
-        Destroy(playedCard.gameObject);
         lastCapturer = "player";
 
         if (tableCards.Count == 0)
@@ -754,9 +760,14 @@ public class GameManager : MonoBehaviour
         foreach (var c in captures) capturedNames += c.Card.ValueName + " ";
         Debug.Log("[PLAYER] Captured " + playedCard.Card.ValueName + " + [" + capturedNames.TrimEnd(' ', ',') + "] | pile " + playerCaptured.Count + " vs " + aiCaptured.Count);
 
+        CardObject playedObj = playedCard;
+
         CleanupSelection();
         UpdateButtons();
         RenderAll();
+
+        fxRunning = true;
+        StartCoroutine(CaptureFx(playedObj, captures, playerPilePos, false));
         Invoke(nameof(AiTurn), 1f);
     }
 
@@ -802,10 +813,8 @@ public class GameManager : MonoBehaviour
             {
                 aiCaptured.Add(tc.Card);
                 tableCards.Remove(tc);
-                Destroy(tc.gameObject);
             }
             aiCaptured.Add(card.Card);
-            Destroy(card.gameObject);
             lastCapturer = "ai";
 
             if (tableCards.Count == 0)
@@ -831,6 +840,11 @@ public class GameManager : MonoBehaviour
             string aiCapturedNames = "";
             foreach (var c in capture) aiCapturedNames += c.Card.ValueName + " ";
             Debug.Log("[AI] Captured " + card.Card.ValueName + " + [" + aiCapturedNames.TrimEnd(' ', ',') + "] | pile " + playerCaptured.Count + " vs " + aiCaptured.Count);
+
+            // Visual: the played card lands, everything taken pulses, then flies to the AI pile
+            RenderAll();
+            fxRunning = true;
+            StartCoroutine(CaptureFx(card, new List<CardObject>(capture), aiPilePos, true));
         }
         else
         {
@@ -849,9 +863,76 @@ public class GameManager : MonoBehaviour
             TryReDeal();
         }
 
-        phase = TurnPhase.Idle;
+        if (capture == null)
+        {
+            phase = TurnPhase.Idle;
+        }
         UpdateButtons();
         RenderAll();
+    }
+
+    // ---- CARD FX ----
+
+    IEnumerator CaptureFx(CardObject played, List<CardObject> captured, Vector3 pilePos, bool aiSide)
+    {
+        // 1. The played card lands on the group it captured
+        if (captured.Count > 0)
+        {
+            played.TweenTo(captured[0].transform.position, 0.3f);
+            yield return new WaitForSeconds(0.35f);
+        }
+
+        // 2. Highlight everything being taken
+        var group = new List<CardObject>(captured);
+        group.Add(played);
+        foreach (var c in group) c.SetSelected(true);
+        yield return PulseRoutine(group, 0.35f);
+
+        // 3. Fly to the pile and fade out
+        foreach (var c in group) { c.SetSelected(false); c.TweenTo(pilePos, 0.45f); }
+        yield return FadeAndDestroyRoutine(group, 0.45f);
+
+        fxRunning = false;
+
+        if (aiSide && phase == TurnPhase.AiTurn)
+        {
+            phase = TurnPhase.Idle;
+            UpdateButtons();
+        }
+    }
+
+    IEnumerator PulseRoutine(List<CardObject> cards, float duration)
+    {
+        float t = 0f;
+        while (t < 1f)
+        {
+            t += Time.deltaTime / duration;
+            float s = cardScale * (1f + 0.15f * Mathf.Sin(Mathf.PI * Mathf.Clamp01(t)));
+            foreach (var c in cards)
+                if (c != null) c.transform.localScale = new Vector3(s, s, 1f);
+            yield return null;
+        }
+        foreach (var c in cards)
+            if (c != null) c.transform.localScale = new Vector3(cardScale, cardScale, 1f);
+    }
+
+    IEnumerator FadeAndDestroyRoutine(List<CardObject> cards, float duration)
+    {
+        var renderers = new List<SpriteRenderer>();
+        foreach (var c in cards) renderers.Add(c.GetComponent<SpriteRenderer>());
+
+        float t = 0f;
+        while (t < 1f)
+        {
+            t += Time.deltaTime / duration;
+            float a = 1f - Mathf.Clamp01(t);
+            foreach (var sr in renderers)
+                if (sr != null) sr.color = new Color(sr.color.r, sr.color.g, sr.color.b, a);
+            yield return null;
+        }
+
+        foreach (var c in cards)
+            if (c != null) Destroy(c.gameObject);
     }
 
     // ---- AI CAPTURE LOGIC ----
@@ -1061,7 +1142,9 @@ public class GameManager : MonoBehaviour
         float startX = -((cards.Count - 1) * spacing) / 2f;
         for (int i = 0; i < cards.Count; i++)
         {
-            cards[i].transform.position = new Vector3(startX + i * spacing, yPos, 0);
+            Vector3 target = new Vector3(startX + i * spacing, yPos, 0);
+            if (Vector3.Distance(cards[i].transform.position, target) > 0.01f)
+                cards[i].TweenTo(target);
             cards[i].GetComponent<SpriteRenderer>().sortingOrder = i;
         }
     }

@@ -1,5 +1,6 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.EventSystems;
+using System.Collections;
 
 /// <summary>
 /// Makes a card GameObject clickable (touch + mouse) and tracks its data.
@@ -62,5 +63,32 @@ public class CardObject : MonoBehaviour, IPointerClickHandler
     {
         sr = GetComponent<SpriteRenderer>();
         originalColor = sr.color;
+    }
+
+    // ---- Position tweening (smooth transitions) ----
+
+    private Coroutine tweenRoutine;
+
+    /// <summary>
+    /// Glides the card to a world position. A newer call replaces the older tween.
+    /// </summary>
+    public void TweenTo(Vector3 worldPos, float duration = 0.25f)
+    {
+        if (tweenRoutine != null) StopCoroutine(tweenRoutine);
+        tweenRoutine = StartCoroutine(TweenRoutine(worldPos, duration));
+    }
+
+    private IEnumerator TweenRoutine(Vector3 target, float duration)
+    {
+        Vector3 start = transform.position;
+        float t = 0f;
+        while (t < 1f)
+        {
+            t += Time.deltaTime / duration;
+            transform.position = Vector3.Lerp(start, target, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t)));
+            yield return null;
+        }
+        transform.position = target;
+        tweenRoutine = null;
     }
 }
