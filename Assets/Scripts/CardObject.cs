@@ -11,9 +11,6 @@ public class CardObject : MonoBehaviour, IPointerClickHandler
     public Card Card { get; private set; }
     public bool IsFaceUp { get; private set; }
 
-    // Row the card occupies while on the table (0 = top/AI row, 1 = bottom/player row)
-    public int TableRow { get; set; }
-
     // Visual feedback
     private SpriteRenderer sr;
     private Color originalColor;

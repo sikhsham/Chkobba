@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -34,6 +35,8 @@ public class GameManager : MonoBehaviour
     // Layout tuning
     private const float handArcHeight = 0.3f;
     private const float handTilt = 10f;
+    private const float tableArcHeight = 0.4f;
+    private const float tableRowGap = 1.6f;
 
     // State
     private enum TurnPhase { Cutting, Idle, Selecting, AiTurn, RoundEnd }
@@ -87,6 +90,10 @@ public class GameManager : MonoBehaviour
     private CanvasGroup roundPanel;
     private Text roundPanelText;
 
+    // Layout edit mode (debug helper)
+    private bool layoutEditMode;
+    private CardObject dragCard;
+
     private static readonly Color btnGreen  = new Color(0.2f, 0.8f, 0.2f);
     private static readonly Color btnOrange = new Color(1f, 0.6f, 0.1f);
     private static readonly Color btnGray   = new Color(0.4f, 0.4f, 0.4f);
@@ -101,6 +108,57 @@ public class GameManager : MonoBehaviour
         CreateUI();
         UpdateButtons();
         ShowMenu();
+    }
+
+    // ---- LAYOUT EDIT MODE (debug helper) ----
+    // F2 freezes the game so table cards can be hand-placed with the mouse.
+    // F3 prints the current arrangement. F2 again resumes normal play.
+
+    void Update()
+    {
+        var keyboard = Keyboard.current;
+        var mouse = Mouse.current;
+        if (keyboard == null || mouse == null) return;
+
+        if (keyboard.f2Key.wasPressedThisFrame)
+        {
+            layoutEditMode = !layoutEditMode;
+            Time.timeScale = layoutEditMode ? 0f : 1f;
+            dragCard = null;
+            Debug.Log("[LAYOUT] Edit mode " + (layoutEditMode
+                ? "ON - drag table cards with the mouse, F3 prints the arrangement"
+                : "OFF - game resumed"));
+        }
+
+        if (!layoutEditMode) return;
+
+        Vector3 mouseWorld = Camera.main.ScreenToWorldPoint(mouse.position.ReadValue());
+        mouseWorld.z = 0f;
+
+        if (mouse.leftButton.wasPressedThisFrame)
+        {
+            var hit = Physics2D.Raycast(mouseWorld, Vector2.zero);
+            if (hit.collider != null)
+            {
+                var card = hit.collider.GetComponent<CardObject>();
+                if (card != null && tableCards.Contains(card)) dragCard = card;
+            }
+        }
+        else if (mouse.leftButton.isPressed && dragCard != null)
+        {
+            dragCard.transform.position = mouseWorld;
+        }
+        else if (mouse.leftButton.wasReleasedThisFrame)
+        {
+            dragCard = null;
+        }
+
+        if (keyboard.f3Key.wasPressedThisFrame)
+        {
+            Debug.Log("[LAYOUT] Table arrangement (" + tableCards.Count + " cards, offsets from table center):");
+            foreach (var c in tableCards)
+                Debug.Log("[LAYOUT]   " + c.Card.ValueName + " -> (" + c.transform.position.x.ToString("F2") + ", " + (c.transform.position.y - tableY).ToString("F2") + ")");
+        }
     }
 
     // ---- UI CREATION ----
@@ -252,12 +310,14 @@ public class GameManager : MonoBehaviour
 
     void OnCaptureClicked()
     {
+        if (layoutEditMode) return;
         if (phase == TurnPhase.Cutting && !playerIsDealer) { ApplyCut(true); return; }
         if (phase == TurnPhase.Selecting) { ConfirmCapture(); return; }
     }
 
     void OnThrowClicked()
     {
+        if (layoutEditMode) return;
         if (phase == TurnPhase.Cutting && !playerIsDealer) { ApplyCut(false); return; }
         if (phase == TurnPhase.Selecting) { ThrowCard(); return; }
     }
@@ -550,27 +610,17 @@ public class GameManager : MonoBehaviour
             cutterHand.Add(CreateCardObject(deck.Draw(), cutterFaceUp));
             cutterHand.Add(CreateCardObject(deck.Draw(), cutterFaceUp));
 
-            // 4 cards face-up on table, split across the two rows (checkerboard)
+            // 4 cards face-up on table
             for (int i = 0; i < 4; i++)
-            {
-                var tc = CreateCardObject(deck.Draw(), true);
-                tc.TableRow = i % 2;
-                tableCards.Add(tc);
-            }
+                tableCards.Add(CreateCardObject(deck.Draw(), true));
         }
         else
         {
             Debug.Log("[CUT] " + (playerCuts ? "You" : "AI") + " REJECTED " + cuttingCard.ValueName + " - it goes to the table");
-            // Rejected card goes to table (top row), +3 more = 4 total across both rows
-            var cutTc = CreateCardObject(cuttingCard, true);
-            cutTc.TableRow = 0;
-            tableCards.Add(cutTc);
+            // Rejected card goes to table, +3 more = 4 total
+            tableCards.Add(CreateCardObject(cuttingCard, true));
             for (int i = 0; i < 3; i++)
-            {
-                var tc = CreateCardObject(deck.Draw(), true);
-                tc.TableRow = (i + 1) % 2;
-                tableCards.Add(tc);
-            }
+                tableCards.Add(CreateCardObject(deck.Draw(), true));
 
             // Cutter gets 3 fresh cards
             cutterHand.Add(CreateCardObject(deck.Draw(), cutterFaceUp));
@@ -676,7 +726,7 @@ public class GameManager : MonoBehaviour
 
     public void OnCardClicked(CardObject card)
     {
-        if (fxRunning) return;
+        if (fxRunning || layoutEditMode) return;
         if (phase == TurnPhase.Selecting)
         {
             // Click the played card again -> deselect, go back to idle, return card to hand
@@ -714,7 +764,6 @@ public class GameManager : MonoBehaviour
     void PlayPlayerCard(CardObject card)
     {
         playerHand.Remove(card);
-        card.TableRow = 1;
         tableCards.Add(card);
         playedCard = card;
         card.SetSelected(true);
@@ -929,7 +978,6 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            card.TableRow = 0;
             tableCards.Add(card);
             SetInstruction("AI played " + card.Card + ". Your turn...");
             Debug.Log("[AI] Threw " + card.Card.ValueName + " (no capture) | table " + tableCards.Count);
@@ -1233,24 +1281,34 @@ public class GameManager : MonoBehaviour
         int n = tableCards.Count;
         if (n == 0) return;
 
-        if (n == 1)
-        {
-            tableCards[0].TweenTo(new Vector3(0f, tableY, 0));
-            tableCards[0].GetComponent<SpriteRenderer>().sortingOrder = 0;
-            return;
-        }
+        // Rows of up to 4 cards, stacked and centered; extras go to the top rows.
+        // Every row uses the raised-middle arc: 3-card rows raise the middle,
+        // 4-card rows raise the middle two, 2-card rows sit flat.
+        int rowCount = Mathf.Max(1, Mathf.CeilToInt(n / 4f));
+        int baseSize = n / rowCount;
+        int extras = n % rowCount;
+        var rowSizes = new int[rowCount];
+        for (int r = 0; r < rowCount; r++)
+            rowSizes[r] = baseSize + (r < extras ? 1 : 0);
 
-        // Cards spread around the table center on an ellipse; more cards = wider ring
-        float spread = Mathf.Clamp01((n - 1) / 8f);
-        float rx = 2.3f * Mathf.Lerp(0.45f, 1f, spread);
-        float ry = 1.05f * Mathf.Lerp(0.45f, 1f, spread);
-
-        for (int i = 0; i < n; i++)
+        int index = 0;
+        for (int r = 0; r < rowCount; r++)
         {
-            float angle = i * (360f / n) * Mathf.Deg2Rad;
-            Vector3 target = new Vector3(Mathf.Cos(angle) * rx, tableY + Mathf.Sin(angle) * ry, 0);
-            tableCards[i].TweenTo(target, 0.25f);
-            tableCards[i].GetComponent<SpriteRenderer>().sortingOrder = i;
+            int k = rowSizes[r];
+            float rowY = tableY + tableRowGap * ((rowCount - 1) / 2f - r);
+            float startX = -((k - 1) * maxSpacing) / 2f;
+            float rowCenter = (k - 1) / 2f;
+            float maxD = Mathf.Max(rowCenter, 1f);
+            for (int i = 0; i < k; i++)
+            {
+                float dn = (i - rowCenter) / maxD;
+                float y = rowY + tableArcHeight * (1f - dn * dn);
+                Vector3 target = new Vector3(startX + i * maxSpacing, y, 0);
+                if (Vector3.Distance(tableCards[index].transform.position, target) > 0.01f)
+                    tableCards[index].TweenTo(target, 0.25f);
+                tableCards[index].GetComponent<SpriteRenderer>().sortingOrder = index;
+                index++;
+            }
         }
     }
 
