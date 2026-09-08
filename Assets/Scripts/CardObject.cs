@@ -81,23 +81,27 @@ public class CardObject : MonoBehaviour, IPointerClickHandler
     /// <summary>
     /// Glides the card to a world position. A newer call replaces the older tween.
     /// </summary>
-    public void TweenTo(Vector3 worldPos, float duration = 0.25f)
+    public void TweenTo(Vector3 worldPos, float duration = 0.25f, float zRotation = 0f)
     {
         if (tweenRoutine != null) StopCoroutine(tweenRoutine);
-        tweenRoutine = StartCoroutine(TweenRoutine(worldPos, duration));
+        tweenRoutine = StartCoroutine(TweenRoutine(worldPos, duration, zRotation));
     }
 
-    private IEnumerator TweenRoutine(Vector3 target, float duration)
+    private IEnumerator TweenRoutine(Vector3 target, float duration, float targetRotZ)
     {
         Vector3 start = transform.position;
+        float startRot = transform.eulerAngles.z;
         float t = 0f;
         while (t < 1f)
         {
             t += Time.deltaTime / duration;
-            transform.position = Vector3.Lerp(start, target, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t)));
+            float k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t));
+            transform.position = Vector3.Lerp(start, target, k);
+            transform.eulerAngles = new Vector3(0f, 0f, Mathf.LerpAngle(startRot, targetRotZ, k));
             yield return null;
         }
         transform.position = target;
+        transform.eulerAngles = new Vector3(0f, 0f, targetRotZ);
         tweenRoutine = null;
     }
 }

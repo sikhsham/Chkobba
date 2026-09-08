@@ -31,7 +31,9 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float aiY = 2f;
     [SerializeField] private float tableY = 0f;
 
-    private const float visibleWidth = 9f;
+    // Layout tuning
+    private const float handArcHeight = 0.3f;
+    private const float handTilt = 10f;
 
     // State
     private enum TurnPhase { Cutting, Idle, Selecting, AiTurn, RoundEnd }
@@ -76,7 +78,7 @@ public class GameManager : MonoBehaviour
     // Card fx
     private bool fxRunning;
     private static readonly Vector3 aiPilePos = new Vector3(4.4f, 2.9f, 0);
-    private static readonly Vector3 playerPilePos = new Vector3(4.4f, -2.9f, 0);
+    private static readonly Vector3 playerPilePos = new Vector3(-4.4f, -2.9f, 0);
     private List<CardObject> playerPileCards = new List<CardObject>();
     private List<CardObject> aiPileCards = new List<CardObject>();
     private const int maxPileVisual = 5;
@@ -990,7 +992,7 @@ public class GameManager : MonoBehaviour
         {
             if (c == null) continue;
             c.ShowBack();
-            c.transform.position = PileSlot(targetPile.Count, pilePos);
+            c.transform.position = PileSlot(targetPile.Count, pilePos, aiSide ? -1f : 1f);
             targetPile.Add(c);
         }
         while (targetPile.Count > maxPileVisual)
@@ -998,6 +1000,8 @@ public class GameManager : MonoBehaviour
             Destroy(targetPile[0].gameObject);
             targetPile.RemoveAt(0);
         }
+
+        Debug.Log("[FX] " + (aiSide ? "AI" : "player") + " pile stacked at " + PileSlot(targetPile.Count, pilePos, aiSide ? -1f : 1f) + " | pile size " + targetPile.Count);
 
         fxRunning = false;
 
@@ -1008,9 +1012,10 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    Vector3 PileSlot(int index, Vector3 basePos)
+    Vector3 PileSlot(int index, Vector3 basePos, float xDir)
     {
-        return basePos + new Vector3(index * 0.05f, index * 0.04f, 0);
+        // Stacks grow toward the screen center so the newest card stays visible
+        return basePos + new Vector3(xDir * index * 0.05f, index * 0.04f, 0);
     }
 
     IEnumerator PulseRoutine(List<CardObject> cards, float duration)
@@ -1218,50 +1223,64 @@ public class GameManager : MonoBehaviour
 
     void RenderAll()
     {
-        RenderGroup(playerHand, playerY, maxSpacing);
-        RenderGroup(aiHand, aiY, maxSpacing);
+        RenderGroup(playerHand, playerY, true);
+        RenderGroup(aiHand, aiY, false);
         RenderTable();
     }
 
     void RenderTable()
     {
-        var top = new List<CardObject>();
-        var bottom = new List<CardObject>();
-        foreach (var tc in tableCards)
+        int n = tableCards.Count;
+        if (n == 0) return;
+
+        if (n == 1)
         {
-            if (tc.TableRow == 0) top.Add(tc);
-            else bottom.Add(tc);
+            tableCards[0].TweenTo(new Vector3(0f, tableY, 0));
+            tableCards[0].GetComponent<SpriteRenderer>().sortingOrder = 0;
+            return;
         }
-        RenderGroup(top, tableY + 0.8f, true, 0);
-        RenderGroup(bottom, tableY - 0.8f, true, top.Count);
-    }
 
-    void RenderGroup(List<CardObject> cards, float yPos, bool compress, int orderBase = 0)
-    {
-        float spacing = compress ? CalcCompressedSpacing(cards.Count) : maxSpacing;
-        RenderGroup(cards, yPos, spacing, orderBase);
-    }
+        // Cards spread around the table center on an ellipse; more cards = wider ring
+        float spread = Mathf.Clamp01((n - 1) / 8f);
+        float rx = 2.3f * Mathf.Lerp(0.45f, 1f, spread);
+        float ry = 1.05f * Mathf.Lerp(0.45f, 1f, spread);
 
-    void RenderGroup(List<CardObject> cards, float yPos, float spacing, int orderBase = 0)
-    {
-        if (cards.Count == 0) return;
-        float startX = -((cards.Count - 1) * spacing) / 2f;
-        for (int i = 0; i < cards.Count; i++)
+        for (int i = 0; i < n; i++)
         {
-            Vector3 target = new Vector3(startX + i * spacing, yPos, 0);
-            if (Vector3.Distance(cards[i].transform.position, target) > 0.01f)
-                cards[i].TweenTo(target);
-            cards[i].GetComponent<SpriteRenderer>().sortingOrder = orderBase + i;
+            float angle = i * (360f / n) * Mathf.Deg2Rad;
+            Vector3 target = new Vector3(Mathf.Cos(angle) * rx, tableY + Mathf.Sin(angle) * ry, 0);
+            tableCards[i].TweenTo(target, 0.25f);
+            tableCards[i].GetComponent<SpriteRenderer>().sortingOrder = i;
         }
     }
 
-    float CalcCompressedSpacing(int count)
+    void RenderGroup(List<CardObject> cards, float yPos, bool lower)
     {
-        if (count <= 1) return maxSpacing;
-        float needed = (count - 1) * maxSpacing;
-        if (needed <= visibleWidth) return maxSpacing;
-        float minSpacing = 0.4f;
-        float fitSpacing = visibleWidth / (count - 1);
-        return Mathf.Max(fitSpacing, minSpacing);
+        int n = cards.Count;
+        if (n == 0) return;
+
+        // Measure the real card size (sprite-local bounds x scale = world size, rotation-proof)
+        var sr0 = cards[0].GetComponent<SpriteRenderer>();
+        float cardW = sr0.sprite.bounds.size.x * cards[0].transform.localScale.x;
+        float cardH = sr0.sprite.bounds.size.y * cards[0].transform.localScale.y;
+
+        // Outer cards pulled 1/2 card width closer to the middle one, then loosened 10% back out
+        float spacing = Mathf.Max(cardW * 0.52f, 0.3f);
+        float yShift = lower ? -cardH / 3f : cardH / 3f;
+        float baseY = yPos + yShift;
+        float startX = -((n - 1) * spacing) / 2f;
+        float center = (n - 1) / 2f;
+        float maxD = Mathf.Max(center, 1f);
+        for (int i = 0; i < n; i++)
+        {
+            float dn = (i - center) / maxD;
+            float y = baseY + handArcHeight * (0.5f - 0.5f * dn * dn);
+            float rot = (n >= 2) ? -(dn * handTilt) : 0f;
+            if (n == 1) { y = baseY; rot = 0f; }
+            Vector3 target = new Vector3(startX + i * spacing, y, 0);
+            cards[i].TweenTo(target, 0.25f, rot);
+            // Middle card renders on top; outer cards tuck under it symmetrically
+            cards[i].GetComponent<SpriteRenderer>().sortingOrder = n - 1 - (int)Mathf.Round(Mathf.Abs(i - center));
+        }
     }
 }
