@@ -1277,8 +1277,8 @@ public class GameManager : MonoBehaviour
 
     void RenderAll()
     {
-        RenderGroup(playerHand, playerY, true);
-        RenderGroup(aiHand, aiY, false);
+        RenderHand(playerHand, playerY, false);
+        RenderHand(aiHand, aiY, true);
         RenderTable();
     }
 
@@ -1303,7 +1303,7 @@ public class GameManager : MonoBehaviour
             int k = rowSizes[r];
             float rowY = tableY + tableRowGap * ((rowCount - 1) / 2f - r);
             float cardW = tableCards[index].GetComponent<SpriteRenderer>().bounds.size.x;
-            float spacing = Mathf.Max(cardW * 0.94f, 0.3f);
+            float spacing = Mathf.Max(cardW * 1.05f, 0.3f);
             float startX = -((k - 1) * spacing) / 2f;
             float rowCenter = (k - 1) / 2f;
             float maxD = Mathf.Max(rowCenter, 1f);
@@ -1320,7 +1320,7 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    void RenderGroup(List<CardObject> cards, float yPos, bool lower)
+    void RenderHand(List<CardObject> cards, float yPos, bool enemy)
     {
         int n = cards.Count;
         if (n == 0) return;
@@ -1330,27 +1330,30 @@ public class GameManager : MonoBehaviour
         float cardW = sr0.sprite.bounds.size.x * cards[0].transform.localScale.x;
         float cardH = sr0.sprite.bounds.size.y * cards[0].transform.localScale.y;
 
-        // Outer cards pulled 1/2 card width closer to the middle one, then loosened 10% back out
-        float spacing = Mathf.Max(cardW * 0.52f, 0.3f);
-        float yShift = lower ? -cardH / 3f : cardH / 3f;
+        // Player: spread with 3% gaps. AI: tight overlapping fan (unchanged).
+        float spacing = enemy ? Mathf.Max(cardW * 0.52f, 0.3f) : Mathf.Max(cardW * 1.03f, 0.3f);
+        float yShift = enemy ? cardH / 3f : -cardH / 3f;
         float baseY = yPos + yShift;
         float startX = -((n - 1) * spacing) / 2f;
         float center = (n - 1) / 2f;
         float maxD = Mathf.Max(center, 1f);
+        // The AI's fan mirrors the player's: its middle dips toward the table
+        float arcSign = enemy ? -1f : 1f;
+        float tiltSign = enemy ? 1f : -1f;
         for (int i = 0; i < n; i++)
         {
             float dn = (i - center) / maxD;
-            float y = baseY + handArcHeight * (0.5f - 0.5f * dn * dn);
-            float rot = (n >= 2) ? -(dn * handTilt) : 0f;
+            float y = baseY + arcSign * handArcHeight * (0.5f - 0.5f * dn * dn);
+            float rot = (n >= 2) ? (tiltSign * dn * handTilt) : 0f;
             if (n == 1) { y = baseY; rot = 0f; }
-            // The picked (lifted) card pops up above the hand fan and renders on top
-            if (cards[i] == playedCard) { y += 0.55f; rot = 0f; }
+            // The picked (lifted) card pops up above the player's fan and renders on top
+            if (!enemy && cards[i] == playedCard) { y += 0.55f; rot = 0f; }
             Vector3 target = new Vector3(startX + i * spacing, y, 0);
             cards[i].TweenTo(target, 0.25f, rot);
-            // Middle card renders on top; outer cards tuck under it symmetrically
-            cards[i].GetComponent<SpriteRenderer>().sortingOrder = (cards[i] == playedCard)
-                ? 100
-                : n - 1 - (int)Mathf.Round(Mathf.Abs(i - center));
+            // Player: middle card on top. AI (mirrored fan): middle card on the bottom layer.
+            int midTopOrder = n - 1 - (int)Mathf.Round(Mathf.Abs(i - center));
+            int midBottomOrder = (int)Mathf.Round(Mathf.Abs(i - center));
+            cards[i].GetComponent<SpriteRenderer>().sortingOrder = enemy ? midBottomOrder : midTopOrder;
         }
     }
 }
