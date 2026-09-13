@@ -763,28 +763,24 @@ public class GameManager : MonoBehaviour
 
     void PlayPlayerCard(CardObject card)
     {
-        playerHand.Remove(card);
-        tableCards.Add(card);
+        // The card stays in the hand but lifts up - it only leaves on CAPTURE or THROW
         playedCard = card;
         card.SetSelected(true);
         selectedTable.Clear();
         phase = TurnPhase.Selecting;
-        Debug.Log("[PLAYER] Played " + card.Card.ValueName);
+        Debug.Log("[PLAYER] Picked " + card.Card.ValueName);
 
-        foreach (var c in playerHand) c.SetDim(true);
+        foreach (var c in playerHand) if (c != card) c.SetDim(true);
         foreach (var c in aiHand) c.SetDim(true);
 
-        SetInstruction("Select cards to capture, or THROW. Click played card to cancel.");
+        SetInstruction("Select table cards to capture, or THROW. Click the card again to cancel.");
         UpdateButtons();
         RenderAll();
     }
 
     void CancelPlayedCard()
     {
-        tableCards.Remove(playedCard);
         playedCard.SetSelected(false);
-        playedCard.SetDim(false);
-        playerHand.Add(playedCard);
         playedCard = null;
 
         foreach (var c in selectedTable) c.SetSelected(false);
@@ -840,7 +836,12 @@ public class GameManager : MonoBehaviour
     {
         Debug.Log("[PLAYER] Threw " + playedCard.Card.ValueName + " (no capture)");
         phase = TurnPhase.AiTurn;
+        var thrown = playedCard;
         CleanupSelection();
+
+        // The thrown card now actually leaves the hand and lands on the table
+        playerHand.Remove(thrown);
+        tableCards.Add(thrown);
         SetInstruction("Thrown! AI turn...");
         UpdateButtons();
         RenderAll();
@@ -859,7 +860,7 @@ public class GameManager : MonoBehaviour
         }
 
         playerCaptured.Add(playedCard.Card);
-        tableCards.Remove(playedCard);
+        playerHand.Remove(playedCard);
         lastCapturer = "player";
 
         if (tableCards.Count == 0)
@@ -1335,10 +1336,14 @@ public class GameManager : MonoBehaviour
             float y = baseY + handArcHeight * (0.5f - 0.5f * dn * dn);
             float rot = (n >= 2) ? -(dn * handTilt) : 0f;
             if (n == 1) { y = baseY; rot = 0f; }
+            // The picked (lifted) card pops up above the hand fan and renders on top
+            if (cards[i] == playedCard) { y += 0.55f; rot = 0f; }
             Vector3 target = new Vector3(startX + i * spacing, y, 0);
             cards[i].TweenTo(target, 0.25f, rot);
             // Middle card renders on top; outer cards tuck under it symmetrically
-            cards[i].GetComponent<SpriteRenderer>().sortingOrder = n - 1 - (int)Mathf.Round(Mathf.Abs(i - center));
+            cards[i].GetComponent<SpriteRenderer>().sortingOrder = (cards[i] == playedCard)
+                ? 100
+                : n - 1 - (int)Mathf.Round(Mathf.Abs(i - center));
         }
     }
 }
