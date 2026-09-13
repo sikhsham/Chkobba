@@ -27,7 +27,6 @@ public class GameManager : MonoBehaviour
 
     [Header("Card Layout")]
     [SerializeField] private float maxSpacing = 1.2f;
-    [SerializeField] private float cardScale = 2f;
     [SerializeField] private float playerY = -2f;
     [SerializeField] private float aiY = 2f;
     [SerializeField] private float tableY = 0f;
@@ -715,7 +714,10 @@ public class GameManager : MonoBehaviour
         co.Setup(card, faceUp);
         var sr = obj.AddComponent<SpriteRenderer>();
         sr.sprite = faceUp ? CardSpriteLoader.GetSpriteForCard(card) : CardSpriteLoader.GetCardBackSprite();
-        obj.transform.localScale = new Vector3(cardScale, cardScale, 1);
+        // Normalize every card to a constant world height, whatever the source resolution
+        const float targetHeight = 1.28f;
+        float s = targetHeight / sr.sprite.bounds.size.y;
+        obj.transform.localScale = new Vector3(s, s, 1);
         obj.AddComponent<BoxCollider2D>();
         obj.transform.position = new Vector3(8f, 0f, 0); // spawn at the deck corner, tweens into place
         co.InitColor();
@@ -1069,17 +1071,20 @@ public class GameManager : MonoBehaviour
 
     IEnumerator PulseRoutine(List<CardObject> cards, float duration)
     {
+        var baseScales = new List<Vector3>();
+        foreach (var c in cards) baseScales.Add(c != null ? c.transform.localScale : Vector3.one);
+
         float t = 0f;
         while (t < 1f)
         {
             t += Time.deltaTime / duration;
-            float s = cardScale * (1f + 0.15f * Mathf.Sin(Mathf.PI * Mathf.Clamp01(t)));
-            foreach (var c in cards)
-                if (c != null) c.transform.localScale = new Vector3(s, s, 1f);
+            float k = 1f + 0.15f * Mathf.Sin(Mathf.PI * Mathf.Clamp01(t));
+            for (int i = 0; i < cards.Count; i++)
+                if (cards[i] != null) cards[i].transform.localScale = baseScales[i] * k;
             yield return null;
         }
-        foreach (var c in cards)
-            if (c != null) c.transform.localScale = new Vector3(cardScale, cardScale, 1f);
+        for (int i = 0; i < cards.Count; i++)
+            if (cards[i] != null) cards[i].transform.localScale = baseScales[i];
     }
 
     // ---- AI CAPTURE LOGIC ----
@@ -1297,14 +1302,16 @@ public class GameManager : MonoBehaviour
         {
             int k = rowSizes[r];
             float rowY = tableY + tableRowGap * ((rowCount - 1) / 2f - r);
-            float startX = -((k - 1) * maxSpacing) / 2f;
+            float cardW = tableCards[index].GetComponent<SpriteRenderer>().bounds.size.x;
+            float spacing = Mathf.Max(cardW * 0.94f, 0.3f);
+            float startX = -((k - 1) * spacing) / 2f;
             float rowCenter = (k - 1) / 2f;
             float maxD = Mathf.Max(rowCenter, 1f);
             for (int i = 0; i < k; i++)
             {
                 float dn = (i - rowCenter) / maxD;
                 float y = rowY + tableArcHeight * (1f - dn * dn);
-                Vector3 target = new Vector3(startX + i * maxSpacing, y, 0);
+                Vector3 target = new Vector3(startX + i * spacing, y, 0);
                 if (Vector3.Distance(tableCards[index].transform.position, target) > 0.01f)
                     tableCards[index].TweenTo(target, 0.25f);
                 tableCards[index].GetComponent<SpriteRenderer>().sortingOrder = index;
