@@ -31,3 +31,6 @@ Thumbs.db
 *_BurstDebugInformation_DoNotShip/
 *_BackUpThisFolder_ButDontShipItWithYourGame/
 .utmp/
+
+# Unity pipeline screenshot temp
+Assets/Temp/
