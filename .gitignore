@@ -34,3 +34,6 @@ Thumbs.db
 
 # Unity pipeline screenshot temp
 Assets/Temp/
+
+# Batch build logs
+*.log

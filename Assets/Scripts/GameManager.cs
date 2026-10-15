@@ -26,7 +26,6 @@ public class GameManager : MonoBehaviour
     public static GameManager Instance { get; private set; }
 
     [Header("Card Layout")]
-    [SerializeField] private float maxSpacing = 1.2f;
     [SerializeField] private float playerY = -2f;
     [SerializeField] private float aiY = 2f;
     [SerializeField] private float tableY = 0f;
